@@ -141,7 +141,7 @@ export function Financeiro() {
                 <WalletCards size={120} strokeWidth={1} />
               </div>
               <div className="relative z-10">
-                <p className="text-zinc-400 text-xs font-semibold uppercase tracking-widest mb-1">Previsto no mês</p>
+                <p className="text-zinc-400 text-xs font-semibold uppercase tracking-widest mb-1">Faturamento do mês</p>
                 <p className="text-white text-5xl font-bold tracking-tighter">
                   {formatarMoeda(fatura.previsto)}
                 </p>
