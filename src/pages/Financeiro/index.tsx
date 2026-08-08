@@ -202,7 +202,7 @@ export function Financeiro() {
                       <div className="flex items-center gap-2 flex-wrap mt-1">
                         <span className="text-zinc-400 text-xs font-medium">
                           {rotuloFormaPagamento(p.forma_pagamento)}
-                          {p.forma_pagamento === "promissoria" && ` • ${p.parcela}/${p.total_parcelas}`}
+                          {p.total_parcelas > 1 && ` • ${p.parcela}/${p.total_parcelas}`}
                         </span>
                         <span className={`text-[10px] uppercase font-bold tracking-widest px-2 py-0.5 rounded-md border ${
                           p.status === "pago"
@@ -213,24 +213,20 @@ export function Financeiro() {
                         }`}>
                           {p.status === "pago"
                             ? "Pago"
-                            : p.forma_pagamento === "cartao"
-                              ? "Repasse"
-                              : vencida
-                                ? "Vencido"
-                                : "Pendente"}
+                            : vencida
+                              ? "Vencido"
+                              : "Pendente"}
                         </span>
                         <span className="text-zinc-500 text-xs">
                           {p.status === "pago"
                             ? `recebido em ${formatarData(p.data_pagamento!)}`
-                            : p.forma_pagamento === "cartao"
-                              ? `repasse previsto ${formatarData(p.vencimento)}`
-                              : `vence ${formatarData(p.vencimento)}`}
+                            : `vence ${formatarData(p.vencimento)}`}
                         </span>
                       </div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <p className="text-white font-bold tracking-tight">{formatarMoeda(p.valor)}</p>
-                      {p.status === "pendente" && p.forma_pagamento !== "cartao" && p.cliente_telefone && (
+                      {p.status === "pendente" && p.cliente_telefone && (
                         <button
                           onClick={(e) => {
                             e.preventDefault()

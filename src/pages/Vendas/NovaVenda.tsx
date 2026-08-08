@@ -95,7 +95,7 @@ export function NovaVenda() {
       {/* Cabeçalho */}
       <div>
         <h1 className="text-white text-3xl font-semibold tracking-tighter">Nova Venda</h1>
-        <p className="text-zinc-500 text-sm mt-1 font-medium">Registre uma venda direta e vá para o caixa.</p>
+        <p className="text-zinc-500 text-sm mt-1 font-medium">Monte a sacola e escolha se o cliente paga agora ou futuramente.</p>
       </div>
 
       <div className="space-y-6">
@@ -119,7 +119,7 @@ export function NovaVenda() {
               </button>
             </div>
           ) : (
-            <AutocompleteBusca
+            <AutocompleteBusca<Cliente>
               placeholder="Buscar ou criar cliente..."
               buscar={buscarClientesPorNome}
               criar={(nome) => criarCliente(usuario!.loja_id, nome)}
@@ -234,7 +234,7 @@ export function NovaVenda() {
         onClick={handleSalvar}
       >
         <CreditCard className="mr-2" size={20} strokeWidth={2.5}/>
-        {salvando ? "Processando..." : "Ir para Pagamento"}
+        {salvando ? "Processando..." : "Continuar para recebimento"}
       </Button>
     </div>
   )

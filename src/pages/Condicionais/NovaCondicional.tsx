@@ -92,7 +92,7 @@ export function NovaCondicional() {
               </button>
             </div>
           ) : (
-            <AutocompleteBusca
+            <AutocompleteBusca<Cliente>
               placeholder="Buscar ou criar cliente..."
               buscar={buscarClientesPorNome}
               criar={(nome) => criarCliente(usuario!.loja_id, nome)}

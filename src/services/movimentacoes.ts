@@ -190,8 +190,7 @@ export async function listarVendas() {
 export async function listarHistoricoVendas() {
   const { data, error } = await supabase
     .from("movimentacoes")
-    .select("*, clientes(nome), movimentacao_itens(*, produtos(nome))")
-    .eq("status", "fechada")
+    .select("*, clientes(nome), movimentacao_itens(*, produtos(nome)), pagamentos(id, valor, valor_liquido, vencimento, data_pagamento, status, forma_pagamento)")
     .order("created_at", { ascending: false })
 
   if (error) throw error
@@ -224,7 +223,7 @@ export async function atualizarValorTotalMovimentacao(id: string, novoValor: num
 export async function getMovimentacaoParaPagamento(id: string) {
   const { data, error } = await supabase
     .from("movimentacoes")
-    .select("id, valor_total, status")
+    .select("id, tipo, valor_total, status, clientes(nome), movimentacao_itens(id, produto_id, descricao, quantidade, quantidade_vendida, valor_unitario, produtos(nome))")
     .eq("id", id)
     .single()
 
@@ -234,5 +233,84 @@ export async function getMovimentacaoParaPagamento(id: string) {
     id: data.id as string,
     valor_total: Number(data.valor_total),
     status: data.status as string,
+    tipo: data.tipo as "venda" | "condicional",
+    clientes: data.clientes,
+    movimentacao_itens: data.movimentacao_itens,
   }
+}
+
+async function garantirSemPagamentos(movimentacao_id: string) {
+  const { data, error } = await supabase
+    .from("pagamentos")
+    .select("id")
+    .eq("movimentacao_id", movimentacao_id)
+    .limit(1)
+
+  if (error) throw error
+  if ((data ?? []).length > 0) {
+    throw new Error("A sacola não pode mais ser alterada porque já possui recebimentos registrados.")
+  }
+}
+
+async function recalcularValorTotal(movimentacao_id: string) {
+  const { data: movimentacao, error: erroMov } = await supabase
+    .from("movimentacoes")
+    .select("tipo, status")
+    .eq("id", movimentacao_id)
+    .single()
+  if (erroMov) throw erroMov
+
+  const { data: itens, error: erroItens } = await supabase
+    .from("movimentacao_itens")
+    .select("quantidade, quantidade_vendida, valor_unitario")
+    .eq("movimentacao_id", movimentacao_id)
+  if (erroItens) throw erroItens
+
+  const valor = (itens ?? []).reduce((soma, item) => {
+    const quantidade = movimentacao.tipo === "condicional" && movimentacao.status === "fechada"
+      ? Number(item.quantidade_vendida ?? 0)
+      : Number(item.quantidade)
+    return soma + quantidade * Number(item.valor_unitario)
+  }, 0)
+
+  await atualizarValorTotalMovimentacao(movimentacao_id, valor)
+  return valor
+}
+
+export async function adicionarItemMovimentacao(
+  movimentacao_id: string,
+  item: ItemCondicional,
+  quantidadeVendida?: number
+) {
+  await garantirSemPagamentos(movimentacao_id)
+
+  const { data, error } = await supabase
+    .from("movimentacao_itens")
+    .insert({
+      movimentacao_id,
+      produto_id: item.produto_id,
+      descricao: item.descricao,
+      quantidade: item.quantidade,
+      valor_unitario: item.valor_unitario,
+      quantidade_vendida: quantidadeVendida ?? 0,
+    })
+    .select("*, produtos(nome)")
+    .single()
+
+  if (error) throw error
+  await recalcularValorTotal(movimentacao_id)
+  return data
+}
+
+export async function removerItemMovimentacao(movimentacao_id: string, item_id: string) {
+  await garantirSemPagamentos(movimentacao_id)
+
+  const { error } = await supabase
+    .from("movimentacao_itens")
+    .delete()
+    .eq("id", item_id)
+    .eq("movimentacao_id", movimentacao_id)
+
+  if (error) throw error
+  return recalcularValorTotal(movimentacao_id)
 }

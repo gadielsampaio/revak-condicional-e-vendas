@@ -1,13 +1,9 @@
 import { adicionarMesesISO, hojeLocalISO } from "@/lib/datas"
-import {
-  arredondarCentavos,
-  distribuirEmParcelas,
-  ratearValorLiquido,
-  valorFinanceiro,
-} from "@/lib/valores"
+import { arredondarCentavos, distribuirEmParcelas } from "@/lib/valores"
 import { supabase } from "@/services/supabase"
 
 export type FormaPagamento = "pix" | "dinheiro" | "cartao" | "promissoria"
+export type FormaRecebimento = Exclude<FormaPagamento, "promissoria">
 
 export type Pagamento = {
   id: string
@@ -23,14 +19,44 @@ export type Pagamento = {
   valor_liquido: number | null
 }
 
-type DadosPagamento = {
+type DadosRecebimentoAgora = {
   movimentacao_id: string
-  forma_pagamento: FormaPagamento
+  forma_pagamento: FormaRecebimento
   valor_total: number
-  data_recebimento?: string
   taxa_cartao?: number
+}
+
+type DadosPagamentoProgramado = {
+  movimentacao_id: string
+  forma_prevista: FormaPagamento
+  valor_total: number
+  primeira_data: string
   numero_parcelas?: number
-  primeira_data?: string
+  entrada_valor?: number
+  entrada_forma?: FormaRecebimento
+  entrada_taxa_cartao?: number
+}
+
+function validarTaxaCartao(taxa?: number) {
+  const taxaNormalizada = taxa ?? 0
+  if (!Number.isFinite(taxaNormalizada) || taxaNormalizada < 0 || taxaNormalizada > 100) {
+    throw new Error("A taxa do cartão deve estar entre 0% e 100%.")
+  }
+  return taxaNormalizada
+}
+
+function dadosLiquidosCartao(valor: number, forma: FormaRecebimento, taxa?: number) {
+  if (forma !== "cartao") {
+    return { taxa_cartao: null, valor_liquido: null }
+  }
+
+  const taxaNormalizada = validarTaxaCartao(taxa)
+  const valorLiquido = arredondarCentavos(valor - (valor * taxaNormalizada) / 100)
+
+  return {
+    taxa_cartao: taxaNormalizada || null,
+    valor_liquido: taxaNormalizada ? valorLiquido : null,
+  }
 }
 
 async function garantirMovimentacaoSemPagamento(movimentacaoId: string) {
@@ -47,7 +73,7 @@ async function garantirMovimentacaoSemPagamento(movimentacaoId: string) {
   }
 }
 
-export async function registrarPagamento(dados: DadosPagamento) {
+export async function registrarRecebimentoAgora(dados: DadosRecebimentoAgora) {
   const hoje = hojeLocalISO()
   const valorTotal = arredondarCentavos(dados.valor_total)
 
@@ -57,71 +83,82 @@ export async function registrarPagamento(dados: DadosPagamento) {
 
   await garantirMovimentacaoSemPagamento(dados.movimentacao_id)
 
-  if (dados.forma_pagamento === "pix" || dados.forma_pagamento === "dinheiro") {
-    const { error } = await supabase.from("pagamentos").insert({
-      movimentacao_id: dados.movimentacao_id,
-      parcela: 1,
-      total_parcelas: 1,
-      valor: valorTotal,
-      forma_pagamento: dados.forma_pagamento,
-      vencimento: hoje,
-      data_pagamento: hoje,
-      status: "pago",
-    })
+  const cartao = dadosLiquidosCartao(valorTotal, dados.forma_pagamento, dados.taxa_cartao)
+  const { error } = await supabase.from("pagamentos").insert({
+    movimentacao_id: dados.movimentacao_id,
+    parcela: 1,
+    total_parcelas: 1,
+    valor: valorTotal,
+    forma_pagamento: dados.forma_pagamento,
+    vencimento: hoje,
+    data_pagamento: hoje,
+    status: "pago",
+    ...cartao,
+  })
 
-    if (error) throw error
-    return
-  }
+  if (error) throw error
+}
 
-  if (dados.forma_pagamento === "cartao") {
-    if (!dados.data_recebimento) {
-      throw new Error("Informe a data prevista de recebimento do cartão.")
-    }
-
-    const taxa = dados.taxa_cartao ?? 0
-    if (!Number.isFinite(taxa) || taxa < 0 || taxa > 100) {
-      throw new Error("A taxa do cartão deve estar entre 0% e 100%.")
-    }
-
-    const valorLiquido = arredondarCentavos(valorTotal - (valorTotal * taxa) / 100)
-
-    const { error } = await supabase.from("pagamentos").insert({
-      movimentacao_id: dados.movimentacao_id,
-      parcela: 1,
-      total_parcelas: 1,
-      valor: valorTotal,
-      forma_pagamento: "cartao",
-      vencimento: dados.data_recebimento,
-      status: "pendente",
-      taxa_cartao: taxa || null,
-      valor_liquido: taxa ? valorLiquido : null,
-    })
-
-    if (error) throw error
-    return
-  }
-
+export async function registrarPagamentoProgramado(dados: DadosPagamentoProgramado) {
+  const hoje = hojeLocalISO()
+  const valorTotal = arredondarCentavos(dados.valor_total)
+  const entrada = arredondarCentavos(dados.entrada_valor ?? 0)
   const numeroParcelas = dados.numero_parcelas ?? 1
+
+  if (!Number.isFinite(valorTotal) || valorTotal <= 0) {
+    throw new Error("O valor do pagamento deve ser maior que zero.")
+  }
+  if (!dados.primeira_data) {
+    throw new Error("Informe a data do primeiro vencimento.")
+  }
   if (!Number.isInteger(numeroParcelas) || numeroParcelas < 1 || numeroParcelas > 120) {
     throw new Error("O número de parcelas deve estar entre 1 e 120.")
   }
-
-  if (!dados.primeira_data) {
-    throw new Error("Informe a data da primeira parcela.")
+  if (!Number.isFinite(entrada) || entrada < 0 || entrada >= valorTotal) {
+    throw new Error("A entrada deve ser menor que o valor total da venda.")
+  }
+  if (entrada > 0 && !dados.entrada_forma) {
+    throw new Error("Informe como a entrada foi recebida.")
   }
 
-  const valoresParcelas = distribuirEmParcelas(valorTotal, numeroParcelas)
-  const parcelas = valoresParcelas.map((valor, index) => ({
-    movimentacao_id: dados.movimentacao_id,
-    parcela: index + 1,
-    total_parcelas: numeroParcelas,
-    valor,
-    forma_pagamento: "promissoria",
-    vencimento: adicionarMesesISO(dados.primeira_data!, index),
-    status: "pendente" as const,
-  }))
+  await garantirMovimentacaoSemPagamento(dados.movimentacao_id)
 
-  const { error } = await supabase.from("pagamentos").insert(parcelas)
+  const registros: Record<string, unknown>[] = []
+
+  if (entrada > 0 && dados.entrada_forma) {
+    const cartao = dadosLiquidosCartao(entrada, dados.entrada_forma, dados.entrada_taxa_cartao)
+    registros.push({
+      movimentacao_id: dados.movimentacao_id,
+      parcela: 1,
+      total_parcelas: 1,
+      valor: entrada,
+      forma_pagamento: dados.entrada_forma,
+      vencimento: hoje,
+      data_pagamento: hoje,
+      status: "pago",
+      ...cartao,
+    })
+  }
+
+  const saldo = arredondarCentavos(valorTotal - entrada)
+  const valoresParcelas = distribuirEmParcelas(saldo, numeroParcelas)
+
+  registros.push(
+    ...valoresParcelas.map((valor, index) => ({
+      movimentacao_id: dados.movimentacao_id,
+      parcela: index + 1,
+      total_parcelas: numeroParcelas,
+      valor,
+      forma_pagamento: dados.forma_prevista,
+      vencimento: adicionarMesesISO(dados.primeira_data, index),
+      data_pagamento: null,
+      status: "pendente" as const,
+      taxa_cartao: null,
+      valor_liquido: null,
+    }))
+  )
+
+  const { error } = await supabase.from("pagamentos").insert(registros)
   if (error) throw error
 }
 
@@ -130,40 +167,69 @@ export async function listarPagamentosPorMovimentacao(movimentacao_id: string) {
     .from("pagamentos")
     .select("*")
     .eq("movimentacao_id", movimentacao_id)
+    .order("status", { ascending: true })
     .order("parcela")
 
   if (error) throw error
   return data as Pagamento[]
 }
 
-export async function marcarComoPagas(ids: string[], data_pagamento?: string) {
+export async function receberPagamentos(
+  ids: string[],
+  formaRecebida: FormaRecebimento,
+  taxaCartao?: number,
+  dataPagamento?: string
+) {
   if (ids.length === 0) return
 
-  const data = data_pagamento ?? hojeLocalISO()
-  const { error } = await supabase
+  const { data: pendentes, error: erroBusca } = await supabase
     .from("pagamentos")
-    .update({ status: "pago", data_pagamento: data })
+    .select("id, valor")
     .in("id", ids)
     .eq("status", "pendente")
 
-  if (error) throw error
+  if (erroBusca) throw erroBusca
+  const data = dataPagamento ?? hojeLocalISO()
+
+  for (const pagamento of pendentes ?? []) {
+    const valor = arredondarCentavos(Number(pagamento.valor))
+    const cartao = dadosLiquidosCartao(valor, formaRecebida, taxaCartao)
+    const { error } = await supabase
+      .from("pagamentos")
+      .update({
+        status: "pago",
+        data_pagamento: data,
+        forma_pagamento: formaRecebida,
+        ...cartao,
+      })
+      .eq("id", pagamento.id)
+      .eq("status", "pendente")
+
+    if (error) throw error
+  }
 }
 
-export async function quitarRestante(movimentacao_id: string) {
-  const hoje = hojeLocalISO()
-  const { error } = await supabase
+export async function receberRestante(
+  movimentacao_id: string,
+  formaRecebida: FormaRecebimento,
+  taxaCartao?: number
+) {
+  const { data, error } = await supabase
     .from("pagamentos")
-    .update({ status: "pago", data_pagamento: hoje })
+    .select("id")
     .eq("movimentacao_id", movimentacao_id)
     .eq("status", "pendente")
 
   if (error) throw error
+  await receberPagamentos((data ?? []).map((p) => p.id as string), formaRecebida, taxaCartao)
 }
 
 export async function pagarParcialmente(
   pagamento: Pagamento,
   valorRecebido: number,
-  novoVencimentoRestante?: string
+  formaRecebida: FormaRecebimento,
+  novoVencimentoRestante?: string,
+  taxaCartao?: number
 ) {
   const hoje = hojeLocalISO()
 
@@ -184,24 +250,15 @@ export async function pagarParcialmente(
   }
 
   const saldoDevedor = arredondarCentavos(
-    parcelasPendentes.reduce((soma, p) => soma + valorFinanceiro(p), 0)
+    parcelasPendentes.reduce((soma, p) => soma + Number(p.valor), 0)
   )
   const recebido = arredondarCentavos(valorRecebido)
 
   if (!Number.isFinite(recebido) || recebido <= 0) {
     throw new Error("Informe um valor recebido maior que zero.")
   }
-
   if (recebido > saldoDevedor + 0.009) {
-    throw new Error(
-      `O valor recebido (${recebido.toLocaleString("pt-BR", {
-        style: "currency",
-        currency: "BRL",
-      })}) é maior que o saldo a receber (${saldoDevedor.toLocaleString("pt-BR", {
-        style: "currency",
-        currency: "BRL",
-      })}).`
-    )
+    throw new Error(`O valor recebido é maior que o saldo a receber.`)
   }
 
   const posteriores = parcelasPendentes.filter(
@@ -216,37 +273,38 @@ export async function pagarParcialmente(
   for (const parcela of parcelasNaOrdem) {
     if (restanteDoRecebimento <= 0.009) break
 
-    const valorDaParcela = valorFinanceiro(parcela)
+    const valorDaParcela = arredondarCentavos(Number(parcela.valor))
 
     if (restanteDoRecebimento >= valorDaParcela - 0.009) {
+      const cartao = dadosLiquidosCartao(valorDaParcela, formaRecebida, taxaCartao)
       const { error: erroUpdate } = await supabase
         .from("pagamentos")
-        .update({ status: "pago", data_pagamento: hoje })
+        .update({
+          status: "pago",
+          data_pagamento: hoje,
+          forma_pagamento: formaRecebida,
+          ...cartao,
+        })
         .eq("id", parcela.id)
         .eq("status", "pendente")
 
       if (erroUpdate) throw erroUpdate
-
       restanteDoRecebimento = arredondarCentavos(restanteDoRecebimento - valorDaParcela)
       continue
     }
 
-    const brutoOriginal = Number(parcela.valor)
-    const liquidoOriginal = valorDaParcela
-    const rateio = ratearValorLiquido(
-      brutoOriginal,
-      liquidoOriginal,
-      restanteDoRecebimento
-    )
-    const possuiValorLiquido = parcela.valor_liquido !== null
+    const valorPago = arredondarCentavos(restanteDoRecebimento)
+    const valorRestante = arredondarCentavos(valorDaParcela - valorPago)
+    const cartao = dadosLiquidosCartao(valorPago, formaRecebida, taxaCartao)
 
     const { error: erroUpdate } = await supabase
       .from("pagamentos")
       .update({
-        valor: rateio.brutoPago,
-        valor_liquido: possuiValorLiquido ? rateio.liquidoPago : null,
+        valor: valorPago,
         status: "pago",
         data_pagamento: hoje,
+        forma_pagamento: formaRecebida,
+        ...cartao,
       })
       .eq("id", parcela.id)
       .eq("status", "pendente")
@@ -257,16 +315,15 @@ export async function pagarParcialmente(
       movimentacao_id: parcela.movimentacao_id,
       parcela: parcela.parcela,
       total_parcelas: parcela.total_parcelas,
-      valor: rateio.brutoRestante,
+      valor: valorRestante,
       forma_pagamento: parcela.forma_pagamento,
       vencimento: novoVencimentoRestante ?? parcela.vencimento,
       status: "pendente",
-      taxa_cartao: parcela.taxa_cartao,
-      valor_liquido: possuiValorLiquido ? rateio.liquidoRestante : null,
+      taxa_cartao: null,
+      valor_liquido: null,
     })
 
     if (erroInsert) throw erroInsert
-
     restanteDoRecebimento = 0
   }
 }

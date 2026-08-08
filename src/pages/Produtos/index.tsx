@@ -1,12 +1,12 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useEffect, useState } from "react"
 import { useAuth } from "@/hooks/useAuth"
-import { listarProdutos, criarProduto, atualizarProduto, type Produto } from "@/services/produtos"
+import { listarProdutos, criarProduto, atualizarProduto, excluirProduto, type Produto } from "@/services/produtos"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Switch } from "@/components/ui/switch"
-import { Plus, ChevronRight, Tag, PackageX } from "lucide-react"
+import { Plus, ChevronRight, Tag, PackageX, Trash2 } from "lucide-react"
 import { BadgeDot } from "@/components/BadgeDot"
 import { atualizarBadgesDoLayout } from "@/hooks/useBadges"
 
@@ -23,6 +23,7 @@ export function Produtos() {
   const [precoEdit, setPrecoEdit] = useState("")
   const [ativoEdit, setAtivoEdit] = useState(true)
   const [salvandoEdit, setSalvandoEdit] = useState(false)
+  const [excluindo, setExcluindo] = useState(false)
 
   async function carregar() {
     setCarregando(true)
@@ -69,6 +70,26 @@ async function handleCriar(e: React.FormEvent) {
     setPrecoEdit(produto.preco_padrao ? String(produto.preco_padrao) : "")
     setAtivoEdit(produto.ativo)
   }
+
+async function handleExcluir() {
+  if (!editando) return
+  if (!window.confirm(`Excluir ${editando.nome}? Se já houver histórico, o produto será apenas arquivado.`)) return
+
+  setExcluindo(true)
+  try {
+    const resultado = await excluirProduto(editando.id)
+    if (resultado.arquivado) {
+      alert("Este produto possui histórico e foi arquivado. Ele não aparecerá mais nas buscas de novas vendas.")
+    }
+    setEditando(null)
+    await carregar()
+    atualizarBadgesDoLayout()
+  } catch (erro) {
+    alert(erro instanceof Error ? erro.message : "Não foi possível excluir o produto.")
+  } finally {
+    setExcluindo(false)
+  }
+}
 
 async function handleSalvarEdicao() {
   if (!editando) return
@@ -230,13 +251,22 @@ async function handleSalvarEdicao() {
 
           </div>
 
-          <DialogFooter className="mt-6 bg-transparent">
+          <DialogFooter className="mt-6 bg-transparent flex-col gap-2 sm:flex-col">
             <Button 
               onClick={handleSalvarEdicao} 
-              disabled={salvandoEdit}
+              disabled={salvandoEdit || excluindo}
               className="w-full bg-white text-black hover:bg-zinc-200 h-12 rounded-xl font-semibold text-base transition-all active:scale-[0.98]"
             >
               {salvandoEdit ? "Salvando..." : "Salvar Alterações"}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={handleExcluir}
+              disabled={salvandoEdit || excluindo}
+              className="w-full h-11 rounded-xl text-red-400 hover:text-red-300 hover:bg-red-500/10"
+            >
+              <Trash2 size={16} className="mr-2" /> {excluindo ? "Excluindo..." : "Excluir produto"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -33,7 +33,6 @@ export async function listarPainelFinanceiro(): Promise<ResumoCliente[]> {
     .from("pagamentos")
     .select("*, movimentacoes!inner(cliente_id, clientes(nome, telefone))")
     .eq("status", "pendente")
-    .neq("forma_pagamento", "cartao")
     .order("vencimento")
 
   if (error) throw error

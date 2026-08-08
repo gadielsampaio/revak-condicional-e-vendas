@@ -1,11 +1,11 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useEffect, useState } from "react"
 import { useAuth } from "@/hooks/useAuth"
-import { listarClientes, criarCliente, atualizarCliente, type Cliente } from "@/services/clientes"
+import { listarClientes, criarCliente, atualizarCliente, excluirCliente, type Cliente } from "@/services/clientes"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
-import { ChevronRight, Phone, Smartphone, Plus } from "lucide-react"
+import { ChevronRight, Phone, Smartphone, Plus, Trash2 } from "lucide-react"
 import { BadgeDot } from "@/components/BadgeDot"
 import { atualizarBadgesDoLayout } from "@/hooks/useBadges"
 
@@ -23,6 +23,7 @@ export function Clientes() {
   const [telefoneEdit, setTelefoneEdit] = useState("")
   const [instagramEdit, setSmartphoneEdit] = useState("")
   const [salvandoEdit, setSalvandoEdit] = useState(false)
+  const [excluindo, setExcluindo] = useState(false)
 
   async function carregar() {
     setCarregando(true)
@@ -60,6 +61,26 @@ async function handleCriar(e: React.FormEvent) {
     setTelefoneEdit(cliente.telefone ?? "")
     setSmartphoneEdit(cliente.instagram ?? "")
   }
+
+async function handleExcluir() {
+  if (!editando) return
+  if (!window.confirm(`Excluir ${editando.nome}?`)) return
+
+  setExcluindo(true)
+  try {
+    const resultado = await excluirCliente(editando.id)
+    if (resultado.arquivado) {
+      alert("Este cliente possui histórico e foi arquivado. Ele não aparecerá mais nas novas buscas.")
+    }
+    setEditando(null)
+    await carregar()
+    atualizarBadgesDoLayout()
+  } catch (erro) {
+    alert(erro instanceof Error ? erro.message : "Não foi possível excluir o cliente.")
+  } finally {
+    setExcluindo(false)
+  }
+}
 
 async function handleSalvarEdicao() {
   if (!editando) return
@@ -199,13 +220,22 @@ async function handleSalvarEdicao() {
             </div>
           </div>
 
-          <DialogFooter className="mt-6 bg-transparent">
+          <DialogFooter className="mt-6 bg-transparent flex-col gap-2 sm:flex-col">
             <Button 
               onClick={handleSalvarEdicao} 
-              disabled={salvandoEdit}
+              disabled={salvandoEdit || excluindo}
               className="w-full bg-white text-black hover:bg-zinc-200 h-12 rounded-xl font-semibold text-base transition-all active:scale-[0.98]"
             >
               {salvandoEdit ? "Salvando..." : "Salvar Alterações"}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={handleExcluir}
+              disabled={salvandoEdit || excluindo}
+              className="w-full h-11 rounded-xl text-red-400 hover:text-red-300 hover:bg-red-500/10"
+            >
+              <Trash2 size={16} className="mr-2" /> {excluindo ? "Excluindo..." : "Excluir cliente"}
             </Button>
           </DialogFooter>
         </DialogContent>
